@@ -120,7 +120,7 @@ generate options:
   --top-k <K>          Top-k 采样候选数 (默认: 0 = 关闭)
   --seed <S>           随机种子，用于复现采样输出 (默认: 0 = 随机)
   --tokenizer <path>   指定 vocab.json tokenizer 文件
-  --quant q8_0|q4_0    运行前把 linear 权重量化到指定格式
+  --quant q8_0|q4_0|q4_1    运行前把 linear 权重量化到指定格式
   --threads <N>        并行算子线程数 (默认: 0 = auto)
   --backend cpu|cuda   执行后端 (默认: cpu；cuda 需要 -DMINI_LLAMA_CUDA=ON)
   --device <N>         CUDA device id，用于 --backend cuda
@@ -140,7 +140,7 @@ bench options:
   -n, --n-predict <N>  生成 token 数量 (默认: 64)
   --seed <S>           随机种子，用于复现采样输出 (默认: 0 = 随机)
   --tokenizer <path>   指定 vocab.json tokenizer 文件
-  --quant q8_0|q4_0    运行前把 linear 权重量化到指定格式
+  --quant q8_0|q4_0|q4_1    运行前把 linear 权重量化到指定格式
   --threads <N>        并行算子线程数 (默认: 0 = auto)
   --backend cpu|cuda   执行后端 (默认: cpu；cuda 需要 -DMINI_LLAMA_CUDA=ON)
   --device <N>         CUDA device id，用于 --backend cuda
@@ -245,7 +245,7 @@ mini-llama.cpp/
     make_golden.py          # 生成 Python golden logits
     compare_logits.py       # 对齐 C++ / Python logits
     test_golden.py          # CTest golden logits 回归
-    test_quant_cli.py       # Q8_0 / Q4_0 CLI smoke
+    test_quant_cli.py       # Q8_0 / Q4_0 / Q4_1 CLI smoke
     test_threaded_cli.py    # 线程一致性 CLI smoke
     run_cuda_benchmarks.py  # CUDA v2 correctness + benchmark report
   models/tiny/

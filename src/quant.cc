@@ -431,8 +431,105 @@ Tensor DequantizeFromQ40(const std::vector<BlockQ40>& blocks,
 }
 
 // ---------------------------------------------------------------------------
-// Q4_1 dequantize
+// Q4_1 quantize / dequantize
 // ---------------------------------------------------------------------------
+/**
+ * @brief 真正实现量化的函数逻辑
+ * 
+ * @param src 
+ * @return std::vector<BlockQ41> 
+ */
+std::vector<BlockQ41> QuantizeToQ41(const Tensor& src) {
+	// 首先进行维度和形状的检查
+	if (src.size() == 0) {
+		return {};
+	}
+	if (CheckedNumel(src.shape, "QuantizeToQ41") != src.size()) {
+		throw std::runtime_error("QuantizeToQ41: shape/data size mismatch");
+	}
+
+	// 计算出一行的权重元素个数
+	const size_t row_size = src.num_dims() >= 2
+	                            ? static_cast<size_t>(src.shape.back())
+	                            : src.size();
+	// 计算总共有多少行
+	const size_t n_rows = src.size() / row_size;
+
+	// 计算一行可以分成多少块
+	// 这里的计算很巧妙，先取整数块，再看余数，余数非0说明还有剩余则要加1块
+	// 如果余数为0，说明能够以整数块包含一行的权重个数
+	const size_t row_blocks =
+	    row_size / kQ41BlockSize + (row_size % kQ41BlockSize != 0);
+	std::vector<BlockQ41> blocks;
+	blocks.reserve(n_rows * row_blocks);
+
+	for (size_t row = 0; row < n_rows; ++row) {
+		// 先计算一行的行偏移
+		const size_t row_offset = row * row_size;
+		for (size_t rb = 0; rb < row_blocks; ++rb) {
+			// 一行内的块偏移
+			const size_t offset = rb * kQ41BlockSize;
+			// 一行内块的起始位置
+			const size_t base = row_offset + offset;
+			// 一块的长度，为什么要加row_size - offset，这是因为
+			// 防止一个块不足32个元素的情况
+			const size_t block_len =
+			    std::min<size_t>(kQ41BlockSize, row_size - offset);
+			float min_value = src.data[base];
+			float max_value = min_value;
+			// 采用for循环从一个块中找出元素最大以及元素最小的值
+			for (size_t j = 0; j < block_len; ++j) {
+				const float value = src.data[base + j];
+				if (!std::isfinite(value)) {
+					throw std::runtime_error("QuantizeToQ41: non-finite input");
+				}
+				min_value = std::min(min_value, value);
+				max_value = std::max(max_value, value);
+			}
+
+			// 构造一个Q4_1的块
+			BlockQ41 block{};
+			// 先转成fp16类型的数据，主要是改变它的精度
+			block.d = FloatToFp16((max_value - min_value) / 15.0f);
+			block.m = FloatToFp16(min_value);
+			// 然后再转回成float类型数据便于后面的计算
+			const float stored_d = Fp16ToFloat(block.d);
+			const float stored_m = Fp16ToFloat(block.m);
+			if (!std::isfinite(stored_d) || !std::isfinite(stored_m)) {
+				throw std::runtime_error(
+				    "QuantizeToQ41: scale/offset exceeds FP16 range");
+			}
+
+			// Use the parameters actually stored in the block. Constant blocks
+			// and scales that underflow to zero are represented by m alone.
+			if (stored_d != 0.0f) {
+				const float inv_d = 1.0f / stored_d;
+				for (size_t j = 0; j < kQ41BlockSize / 2; ++j) {
+					// 量化操作
+					auto quantize = [&](size_t index) -> uint8_t {
+						if (index >= block_len) {
+							return 0;
+						}
+						// 对应公式为 q = (x - min) / d
+						const float q = std::round(
+						    (src.data[base + index] - stored_m) * inv_d);
+						// 将计算出来的量化值限定在0-15之间，比0小的返回0，比15大的返回15
+						// 其它的正常返回
+						return static_cast<uint8_t>(std::clamp(q, 0.0f, 15.0f));
+					};
+					// 采用对称的方式，0和16，1和17，分别计算出高4位和低4位的值
+					const uint8_t low = quantize(j);
+					const uint8_t high = quantize(j + kQ41BlockSize / 2);
+					// 最后的量化值为，高4位要左移后与低4位进行或运算
+					block.qs[j] = static_cast<uint8_t>(low | (high << 4));
+				}
+			}
+			blocks.push_back(block);
+		}
+	}
+	return blocks;
+}
+
 Tensor DequantizeFromQ41(const std::vector<BlockQ41>& blocks,
                          const std::vector<int>& shape) {
 	size_t total = CheckedNumel(shape, "DequantizeFromQ41");
@@ -920,6 +1017,25 @@ float CompareQ40Error(const Tensor& weight, const Tensor& input) {
 
 	if (f32_result.shape != q4_result.shape) {
 		throw std::runtime_error("CompareQ40Error: shape mismatch");
+	}
+
+	float max_err = 0.0f;
+	for (size_t i = 0; i < f32_result.size(); ++i) {
+		float err = std::abs(f32_result.data[i] - q4_result.data[i]);
+		if (err > max_err) {
+			max_err = err;
+		}
+	}
+	return max_err;
+}
+
+float CompareQ41Error(const Tensor& weight, const Tensor& input) {
+	Tensor f32_result = Linear(input, weight);
+	std::vector<BlockQ41> qweight = QuantizeToQ41(weight);
+	Tensor q4_result = LinearQ41(input, qweight, weight.shape);
+
+	if (f32_result.shape != q4_result.shape) {
+		throw std::runtime_error("CompareQ41Error: shape mismatch");
 	}
 
 	float max_err = 0.0f;

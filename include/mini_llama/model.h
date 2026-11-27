@@ -179,6 +179,10 @@ void QuantizeModelToQ80(MiniLlamaModel& model);
 // Embedding, norm, and bias tensors remain unchanged.
 void QuantizeModelToQ40(MiniLlamaModel& model);
 
+// Convert Linear weights to Q4_1, dequantizing other formats first if needed.
+// Embedding, norm, and bias tensors remain unchanged. Invalidates CUDA uploads.
+void QuantizeModelToQ41(MiniLlamaModel& model);
+
 }  // namespace mini_llama
 
 #endif  // INCLUDE_MINI_LLAMA_MODEL_H_

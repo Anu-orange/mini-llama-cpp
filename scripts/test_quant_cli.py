@@ -64,7 +64,7 @@ def main():
         binary = str(ROOT / "build" / "mini-llama")
     binary = str(Path(binary).resolve())
 
-    for quant in ("q8_0", "q4_0"):
+    for quant in ("q8_0", "q4_0", "q4_1"):
         test_generate_quant_smoke(binary, quant)
         print(f"PASS generate_{quant}_smoke")
         test_bench_quant_smoke(binary, quant)

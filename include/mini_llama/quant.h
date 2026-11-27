@@ -31,8 +31,12 @@ Tensor DequantizeFromQ40(const std::vector<BlockQ40>& blocks,
                          const std::vector<int>& shape);
 
 // ---------------------------------------------------------------------------
-// Dequantize / Linear (Q4_1)
+// Quantize / dequantize (Q4_1)
 // ---------------------------------------------------------------------------
+// Packs blocks independently within each row, padding the final block.
+// Throws if input values or FP16 scale/offset are not finite.
+std::vector<BlockQ41> QuantizeToQ41(const Tensor& src);
+
 Tensor DequantizeFromQ41(const std::vector<BlockQ41>& blocks,
                          const std::vector<int>& shape);
 
@@ -67,6 +71,9 @@ float CompareMatmulError(const Tensor& weight, const Tensor& input);
 // Compare F32 Linear vs Q4_0 Linear for the same weight + input.
 // Returns max absolute error.
 float CompareQ40Error(const Tensor& weight, const Tensor& input);
+
+// Compare F32 Linear vs Q4_1 Linear; returns max absolute error.
+float CompareQ41Error(const Tensor& weight, const Tensor& input);
 
 }  // namespace mini_llama
 

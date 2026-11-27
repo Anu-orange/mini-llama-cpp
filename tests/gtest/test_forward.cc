@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -204,4 +205,80 @@ TEST(ForwardTest, TestQ40ForwardMatchesF32) {
 
 	EXPECT_LT(max_err, 2.0f) << "max error too large: " << max_err;
 	EXPECT_LT(mean_err, 0.2f) << "mean error too large: " << mean_err;
+}
+
+TEST(ForwardTest, TestQ41ModelConversion) {
+	for (int source = 0; source < 3; ++source) {
+		MiniLlamaModel model =
+		    LoadModel("models/tiny/model.json", "models/tiny/model.bin");
+		ASSERT_TRUE(model.loaded);
+		if (source == 1) QuantizeModelToQ80(model);
+		if (source == 2) QuantizeModelToQ40(model);
+		auto embedding = model.token_embedding.data;
+		auto norm = model.final_norm.data;
+		auto layer_norm = model.layers[0].attention_norm.data;
+		auto ffn_norm = model.layers[0].ffn_norm.data;
+		model.layers[0].bq = Tensor({model.config.dim}, 0.25f);
+		auto bias = model.layers[0].bq.data;
+		// An existing upload must not keep using pre-conversion weights.
+		model.cuda_weights = std::make_shared<mini_llama::CudaModelWeights>();
+		QuantizeModelToQ41(model);
+		ASSERT_TRUE(!model.cuda_weights);
+		auto check = [](const QuantizedTensor& w) {
+			if (w.type != QuantType::kQ41 || !w.f32_data.empty() ||
+			    !w.q8_0_data.empty() || !w.q4_0_data.empty())
+				return false;
+			size_t row_size = static_cast<size_t>(w.shape.back());
+			return w.q4_1_data.size() ==
+			       (w.num_elements() / row_size) * ((row_size + 31) / 32);
+		};
+		ASSERT_TRUE(check(model.lm_head));
+		for (const auto& layer : model.layers) {
+			for (const auto* w : {&layer.wq, &layer.wk, &layer.wv, &layer.wo,
+			                      &layer.w_gate, &layer.w_up, &layer.w_down}) {
+				ASSERT_TRUE(check(*w));
+			}
+		}
+		auto before = model.lm_head.q4_1_data;
+		QuantizeModelToQ41(model);
+		ASSERT_EQ(before.size(), model.lm_head.q4_1_data.size());
+		for (size_t i = 0; i < before.size(); ++i) {
+			ASSERT_EQ(before[i].d, model.lm_head.q4_1_data[i].d);
+			ASSERT_EQ(before[i].m, model.lm_head.q4_1_data[i].m);
+			for (int j = 0; j < 16; ++j) {
+				ASSERT_EQ(before[i].qs[j], model.lm_head.q4_1_data[i].qs[j]);
+			}
+		}
+		ASSERT_EQ(model.token_embedding.data, embedding);
+		ASSERT_EQ(model.final_norm.data, norm);
+		ASSERT_EQ(model.layers[0].attention_norm.data, layer_norm);
+		ASSERT_EQ(model.layers[0].ffn_norm.data, ffn_norm);
+		ASSERT_EQ(model.layers[0].bq.data, bias);
+	}
+}
+
+TEST(ForwardTest, TestQ41ForwardMatchesF32) {
+	auto f32 = LoadModel("models/tiny/model.json", "models/tiny/model.bin");
+	ASSERT_TRUE(f32.loaded);
+	auto quant = f32;
+	QuantizeModelToQ41(quant);
+	ASSERT_TRUE(ModelWeightBytes(quant) < ModelWeightBytes(f32));
+	MiniLlamaContext baseline(&f32), actual(&quant);
+	// Several positions exercise both initial and history-dependent attention.
+	int pos = 0;
+	for (int token : {1, 104, 101, 108, 108, 111}) {
+		baseline.pos = actual.pos = pos++;
+		Tensor expected = ForwardToken(baseline, f32, token);
+		Tensor logits = ForwardToken(actual, quant, token);
+		ASSERT_EQ(logits.shape, expected.shape);
+		float max_err = 0.0f, sum_err = 0.0f;
+		for (size_t i = 0; i < logits.size(); ++i) {
+			ASSERT_TRUE(std::isfinite(logits.data[i]));
+			float err = std::abs(logits.data[i] - expected.data[i]);
+			max_err = std::max(max_err, err);
+			sum_err += err;
+		}
+		ASSERT_TRUE(max_err < 2.0f);
+		ASSERT_TRUE(sum_err / logits.size() < 0.2f);
+	}
 }

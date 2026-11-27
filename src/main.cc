@@ -281,6 +281,10 @@ static void ApplyQuantOverride(MiniLlamaModel& model,
 		QuantizeModelToQ40(model);
 		return;
 	}
+	if (quant_type == "q4_1") {
+		QuantizeModelToQ41(model);
+		return;
+	}
 	throw std::runtime_error("unsupported quant type: " + quant_type);
 }
 
@@ -327,7 +331,7 @@ static void PrintGenerateUsage(const char* prog) {
 	    << "  --seed <S>           Random seed for reproducible sampling "
 	       "(default: 0 = random)\n"
 	    << "  --tokenizer <path>   Path to vocab.json tokenizer file\n"
-	    << "  --quant q8_0|q4_0    Quantize loaded Linear weights before "
+	    << "  --quant q8_0|q4_0|q4_1    Quantize loaded Linear weights before "
 	       "generation\n"
 	    << "  --threads <n>        Number of threads for parallel ops (0 = "
 	       "auto)\n"
@@ -670,9 +674,10 @@ static int RunGenerate(int argc, char** argv) {
 		}
 	}
 
-	if (!quant_type.empty() && quant_type != "q8_0" && quant_type != "q4_0") {
+	if (!quant_type.empty() && quant_type != "q8_0" && quant_type != "q4_0" &&
+	    quant_type != "q4_1") {
 		std::cerr << "Invalid --quant value: " << quant_type
-		          << ". Supported values: q8_0, q4_0.\n";
+		          << ". Supported values: q8_0, q4_0, q4_1.\n";
 		return 1;
 	}
 
@@ -1490,7 +1495,7 @@ static void PrintBenchUsage(const char* prog) {
 	       "64)\n"
 	    << "  --seed <S>            Random seed (default: 0 = random)\n"
 	    << "  --tokenizer <path>    Path to vocab.json tokenizer file\n"
-	    << "  --quant q8_0|q4_0     Quantize loaded Linear weights before "
+	    << "  --quant q8_0|q4_0|q4_1     Quantize loaded Linear weights before "
 	       "benchmark\n"
 	    << "  --threads <n>         Number of threads for parallel ops (0 = "
 	       "auto)\n"
@@ -1606,9 +1611,10 @@ static int RunBench(int argc, char** argv) {
 		}
 	}
 
-	if (!quant_type.empty() && quant_type != "q8_0" && quant_type != "q4_0") {
+	if (!quant_type.empty() && quant_type != "q8_0" && quant_type != "q4_0" &&
+	    quant_type != "q4_1") {
 		std::cerr << "Invalid --quant value: " << quant_type
-		          << ". Supported values: q8_0, q4_0.\n";
+		          << ". Supported values: q8_0, q4_0, q4_1.\n";
 		return 1;
 	}
 

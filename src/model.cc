@@ -540,4 +540,39 @@ void QuantizeModelToQ40(MiniLlamaModel& model) {
 	}
 }
 
+static void QuantizeQtToQ41(QuantizedTensor& qt) {
+	if (qt.type == QuantType::kQ41) {
+		return;
+	}
+	Tensor t = QuantizedTensorToF32(qt);
+	qt.q4_1_data = QuantizeToQ41(t);
+	qt.type = QuantType::kQ41;
+	qt.f32_data.clear();
+	qt.f32_data.shrink_to_fit();
+	qt.q8_0_data.clear();
+	qt.q8_0_data.shrink_to_fit();
+	qt.q4_0_data.clear();
+	qt.q4_0_data.shrink_to_fit();
+}
+
+/**
+ * @brief 将权重量化为Q4_1
+ * 
+ * @param model 
+ */
+void QuantizeModelToQ41(MiniLlamaModel& model) {
+	// Existing device buffers refer to the weights before conversion.
+	ClearModelCudaWeights(model);
+	QuantizeQtToQ41(model.lm_head);
+	for (auto& lw : model.layers) {
+		QuantizeQtToQ41(lw.wq);
+		QuantizeQtToQ41(lw.wk);
+		QuantizeQtToQ41(lw.wv);
+		QuantizeQtToQ41(lw.wo);
+		QuantizeQtToQ41(lw.w_gate);
+		QuantizeQtToQ41(lw.w_up);
+		QuantizeQtToQ41(lw.w_down);
+	}
+}
+
 }  // namespace mini_llama
